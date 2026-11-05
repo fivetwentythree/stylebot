@@ -1,6 +1,6 @@
 # StyleBot White
 
-StyleBot White is an independent project by [fivetwentythree](https://github.com/fivetwentythree) to build an E. B. White prose rewriter. It draws on *Writings from the New Yorker* and *Essays of E. B. White*. The project’s corpus selection, evaluation design, and development direction are fivetwentythree’s. An ordinary synthetic draft is the input, and White’s source passage is the target.
+StyleBot White is an independent project by lochana perera[fivetwentythree](https://github.com/fivetwentythree)  to build an E. B. White prose rewriter. It draws on *Writings from the New Yorker* and *Essays of E. B. White*. The project’s corpus selection, evaluation design, and development direction are fivetwentythree’s. An ordinary synthetic draft is the input, and White’s source passage is the target.
 
 Dan MacKinlay’s writing about reverse-edit fine-tuning was an inspiration for the project. [Fine-tuning danbot](https://danmackinlay.name/notebook/fine_tuning_danbot.html)
 
@@ -20,13 +20,13 @@ The book text and generated pairs stay in local files. The public repository con
 
 ## Current dataset
 
-The two collections yielded 963 distinct candidate passages. The first batch contains 167 accepted training pairs and 49 external evaluation pairs. Of the training pairs, 82 come from *Writings from the New Yorker* and 85 come from *Essays of E. B. White*. The other passages are indexed locally for generation or review.
+The two collections has 963 distinct candidate passages. The first batch contains 167 accepted training pairs and 49 external evaluation pairs. Of the training pairs, 82 come from *Writings from the New Yorker* and 85 come from *Essays of E. B. White*. The other passages are indexed locally for generation or review.
 
 No exact 24-word sequence crossed the training and evaluation split. The anthology’s *Here Is New York* is the only copy in the corpus.
 
 ## Prepare and generate
 
-Use Python 3.11 or later. The extractors expect the supplied editions’ text export layouts. Each article or essay stays in one split. The preparation step joins or divides prose into passages, skips known verse or heavily quoted material, and corrects obvious transcription artifacts such as line-wrap hyphenation and small-cap openings. Start the local Ollama server before running the generator.
+Python 3.11 was used. The extractors expect the supplied editions’ text export layouts. Each article or essay stays in one split. The preparation step joins or divides prose into passages, skips known verse or heavily quoted material, and corrects obvious transcription artifacts such as line-wrap hyphenation and small-cap openings. Start the local Ollama server before running the generator.
 
 ```sh
 python3 scripts/prepare.py "/path/to/new-yorker.txt" work/white
