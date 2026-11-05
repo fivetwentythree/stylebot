@@ -63,6 +63,8 @@ The packaged dataset has six files.
 
 ## Train Qwen3.5-9B
 
+Stylebot calls the Tinker Cookbook supervised fine-tuning pipeline. It formats each pair as a chat and trains on the assistant turn containing White’s prose. The renderer disables Qwen3.5 thinking for the rewrite task. [Tinker tutorial 303](https://tinker-docs.thinkingmachines.ai/tutorials/cookbook-abstractions/sft-with-config/)
+
 Set `TINKER_API_KEY` in your environment, then run Qwen3.5-9B training on Tinker from the repository root.
 
 ```sh
@@ -75,3 +77,5 @@ uvx --from "stylebot[trainer] @ $STYLEBOT" ai-style train \
 ```
 
 The trainer estimates the cost and asks for confirmation before launching the Tinker job. It creates an internal validation split by whole piece from `pairs.jsonl`. The separate evaluation file stays outside the training input.
+
+After training, the run manifest records the Tinker sampler checkpoint, and Stylebot exports the PEFT adapter to `work/train/peft_adapter` by default. [Tinker checkpoint guide](https://tinker-docs.thinkingmachines.ai/tinker/howto/checkpoints/) · [Adapter export](https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/)
