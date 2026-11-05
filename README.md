@@ -14,11 +14,17 @@ examples/
   policy.json            The E. B. White training prompt for Stylebot
 ```
 
-The generated dataset and the supplied book are kept in the ignored `data/` and `work/` directories. The example uses invented prose to demonstrate the format.
+The book text and generated pairs stay in local files. The public repository contains the scripts and an invented example that demonstrates the format.
+
+## Current dataset
+
+The two collections yielded 963 distinct candidate passages. The first batch contains 167 accepted training pairs and 49 external evaluation pairs. Of the training pairs, 82 come from *Writings from the New Yorker* and 85 come from *Essays of E. B. White*. The other passages are indexed locally for generation or review.
+
+No exact 24-word sequence crossed the training and evaluation split. The anthology’s *Here Is New York* is the only copy in the corpus.
 
 ## Prepare and generate
 
-Use Python 3.11 or later. The extractors expect the supplied editions’ text export layouts. Each article or essay stays in one split. The preparation step joins or divides prose into passages, skips known verse or heavily quoted material, and corrects obvious transcription artifacts such as line-wrap hyphenation and small-cap openings.
+Use Python 3.11 or later. The extractors expect the supplied editions’ text export layouts. Each article or essay stays in one split. The preparation step joins or divides prose into passages, skips known verse or heavily quoted material, and corrects obvious transcription artifacts such as line-wrap hyphenation and small-cap openings. Start the local Ollama server before running the generator.
 
 ```sh
 python3 scripts/prepare.py "/path/to/new-yorker.txt" work/white
@@ -55,15 +61,17 @@ The packaged dataset has six files.
 | `passages.jsonl` | Candidate targets and pairing status |
 | `dataset-summary.json` | Counts, coverage and quality-check outcomes |
 
-Preview the Qwen3.5-9B training run from the repository root.
+## Train Qwen3.5-9B
+
+Set `TINKER_API_KEY` in your environment, then run Qwen3.5-9B training on Tinker from the repository root.
 
 ```sh
 DATA="$PWD/data/eb-white"
-uvx --from "$STYLEBOT" ai-style train \
+uvx --from "stylebot[trainer] @ $STYLEBOT" ai-style train \
   --data-dir "$DATA" --policy "$DATA/policy.json" \
   --work-dir "$PWD/work/train" --manifest-out "$PWD/work/run.json" \
   --base-model Qwen/Qwen3.5-9B --renderer qwen3_5_disable_thinking \
-  --price-per-mtok 1.463 --dry-run
+  --price-per-mtok 1.463
 ```
 
-The trainer also creates an internal validation split by whole piece from `pairs.jsonl`. The separate evaluation file stays outside that command’s training input. The dry run needs no Tinker key.
+The trainer estimates the cost and asks for confirmation before launching the Tinker job. It creates an internal validation split by whole piece from `pairs.jsonl`. The separate evaluation file stays outside the training input.
