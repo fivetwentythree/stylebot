@@ -1,4 +1,4 @@
-# StyleBot White
+# StyleBot 
 
 StyleBot White is an independent project by Lochana Perera ([fivetwentythree](https://github.com/fivetwentythree)) to build an E. B. White prose rewriter. It draws on *Writings from the New Yorker* and *Essays of E. B. White*. The project’s corpus selection, evaluation design, and development direction are Lochana’s. An ordinary synthetic draft is the input, and White’s source passage is the target.
 
