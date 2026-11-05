@@ -1,6 +1,8 @@
 # StyleBot White
 
-Prepare a prose-rewriting dataset from E. B. White’s *Writings from the New Yorker* and *Essays of E. B. White*. The dataset follows [Dan MacKinlay’s Stylebot](https://github.com/danmackinlay/stylebot). An ordinary synthetic draft is the input, and White’s source passage is the target.
+StyleBot White is an independent project by [fivetwentythree](https://github.com/fivetwentythree) to build an E. B. White prose rewriter. It draws on *Writings from the New Yorker* and *Essays of E. B. White*. The project’s corpus selection, evaluation design, and development direction are fivetwentythree’s. An ordinary synthetic draft is the input, and White’s source passage is the target.
+
+Dan MacKinlay’s writing about reverse-edit fine-tuning was an inspiration for the project. [Fine-tuning danbot](https://danmackinlay.name/notebook/fine_tuning_danbot.html)
 
 ```text
 scripts/
