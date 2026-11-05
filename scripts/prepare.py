@@ -50,6 +50,9 @@ OCR_FIXES = {
     "Long Is-land": "Long Island",
     "“Waiden”": "“Walden”",
     "I’ironie": "l’ironie",
+    "millions of Uves": "millions of lives",
+    "world’send article": "world’s-end article",
+    "at the takeofl": "at the takeoff",
 }
 OCR_WRAPS = set(
     "how-ever in-tense some-thing every-body be-hind un-likely back-ground fore-head en-danger some-what un-spoiled de-pressed de-void re-ally Some-times any-thing psycho-logical child-hood him-self some-body snap-ping be-loved an-other some-times for-gotten after-noon any-body be-cause over-powering un-kempt relation-ship s-end al-most un-equivocally al-ways in-creased contem-plates Eng-land com-plied be-wails bur-docks re-marks spar-rows".split()

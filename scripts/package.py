@@ -77,6 +77,8 @@ def check(target, draft):
         None, target_words, input_words, autojunk=False
     ).ratio()
     flags, details = [], {}
+    if any(artifact in target for artifact in ("convert $100", "Highway É")):
+        flags.append("uncertain_source_transcription")
     if (
         not draft
         or PREAMBLE.search(draft)

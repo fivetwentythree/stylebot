@@ -1,11 +1,12 @@
 # StyleBot White
 
-Prepare a prose-rewriting dataset from E. B. White’s *Writings from the New Yorker*. The dataset follows [Dan MacKinlay’s Stylebot](https://github.com/danmackinlay/stylebot): an ordinary synthetic draft is the input, and White’s source passage is the target.
+Prepare a prose-rewriting dataset from E. B. White’s *Writings from the New Yorker* and *Essays of E. B. White*. The dataset follows [Dan MacKinlay’s Stylebot](https://github.com/danmackinlay/stylebot). An ordinary synthetic draft is the input, and White’s source passage is the target.
 
 ```text
 scripts/
   prepare.py            Split the supplied text into pieces and passages
-  synthesize_ollama.py  Produce synthetic drafts with a local Ollama model
+  merge_essays.py       Add the essay collection and remove overlapping passages
+  synthesize_ollama.py Produce synthetic drafts with a local Ollama model
   synthesize.swift       Produce synthetic drafts with Apple’s on-device model
   package.py             Check drafts and export Stylebot JSONL
 examples/
@@ -17,18 +18,21 @@ The generated dataset and the supplied book are kept in the ignored `data/` and 
 
 ## Prepare and generate
 
-Use Python 3.11 or later. The extractor expects the supplied edition’s numbered section headings, article titles and publication dates. Each article stays in one split. It joins or divides prose into coherent passages, excludes a verse piece, and corrects a list of obvious transcription artifacts such as line-wrap hyphenation and small-cap openings.
+Use Python 3.11 or later. The extractors expect the supplied editions’ text export layouts. Each article or essay stays in one split. The preparation step joins or divides prose into passages, skips known verse or heavily quoted material, and corrects obvious transcription artifacts such as line-wrap hyphenation and small-cap openings.
 
 ```sh
-python3 scripts/prepare.py "/path/to/book.txt" work/white
+python3 scripts/prepare.py "/path/to/new-yorker.txt" work/white
+python3 scripts/merge_essays.py "/path/to/essays.txt" work/white work/white-combined
 ollama pull qwen3:4b-instruct-2507-q4_K_M
-python3 scripts/synthesize_ollama.py work/white/passages.jsonl work/white/qwen-output.jsonl
+python3 scripts/synthesize_ollama.py work/white-combined/passages.jsonl work/white-combined/qwen-output.jsonl
 ```
+
+The merge preserves the earlier piece IDs and holdouts. It removes new passages with exact 24-word overlap or substantial overlap in 12-word fingerprints. If you already generated drafts from the first book, carry their JSONL files into the combined working directory to reuse those drafts. The passage IDs still resolve.
 
 With Apple Intelligence available, the Swift script is a second local generator. Its second argument is the number of concurrent requests.
 
 ```sh
-swift scripts/synthesize.swift work/white/passages.jsonl 2 > work/white/drafts.jsonl
+swift scripts/synthesize.swift work/white-combined/passages.jsonl 2 > work/white-combined/drafts.jsonl
 ```
 
 ## Package and verify
@@ -37,10 +41,10 @@ The packager uses the upstream Stylebot validator. It checks length, copying, nu
 
 ```sh
 STYLEBOT='git+https://github.com/danmackinlay/stylebot.git@0101733d68e53221068994444ed3bbb7c4dc92ce'
-uv run --with "$STYLEBOT" python scripts/package.py work/white data/eb-white-new-yorker
+uv run --with "$STYLEBOT" python scripts/package.py work/white-combined data/eb-white
 ```
 
-The output directory contains:
+The packaged dataset has six files.
 
 | File | Purpose |
 | --- | --- |
@@ -51,10 +55,10 @@ The output directory contains:
 | `passages.jsonl` | Candidate targets and pairing status |
 | `dataset-summary.json` | Counts, coverage and quality-check outcomes |
 
-From the repository root, preview the Qwen3.5-9B training run:
+Preview the Qwen3.5-9B training run from the repository root.
 
 ```sh
-DATA="$PWD/data/eb-white-new-yorker"
+DATA="$PWD/data/eb-white"
 uvx --from "$STYLEBOT" ai-style train \
   --data-dir "$DATA" --policy "$DATA/policy.json" \
   --work-dir "$PWD/work/train" --manifest-out "$PWD/work/run.json" \
