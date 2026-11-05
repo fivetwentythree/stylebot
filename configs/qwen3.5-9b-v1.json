@@ -1,0 +1,25 @@
+{
+  "model": "Qwen/Qwen3.5-9B",
+  "renderer": "qwen3_5_disable_thinking",
+  "lora_rank": 32,
+  "batch_size": 8,
+  "epochs": 3,
+  "max_length": 4096,
+  "learning_rate": null,
+  "lr_schedule": "linear",
+  "seed": 0,
+  "validation_fraction": 0.1,
+  "eval_every": 10,
+  "save_every": 20,
+  "sampling": {
+    "temperature": 0.3,
+    "max_tokens": 768,
+    "seed": 523
+  },
+  "price_per_million_tokens": {
+    "train": 1.463,
+    "prefill": 0.30,
+    "sample": 0.807,
+    "verified_on": "2026-11-05"
+  }
+}

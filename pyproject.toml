@@ -1,0 +1,17 @@
+[project]
+name = "stylebot-white"
+version = "0.1.0"
+description = "Lochana Perera's project for an E. B. White-inspired prose rewriter"
+requires-python = ">=3.11"
+dependencies = [
+    "stylebot[trainer]",
+    "tinker==0.37.0",
+    "tinker-cookbook==0.5.9",
+    "transformers==5.22.1",
+]
+
+[tool.uv.sources]
+stylebot = { git = "https://github.com/danmackinlay/stylebot.git", rev = "0101733d68e53221068994444ed3bbb7c4dc92ce" }
+
+[tool.ruff]
+line-length = 88
