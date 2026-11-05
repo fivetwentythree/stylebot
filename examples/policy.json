@@ -1,3 +1,3 @@
 {
-  "system_prompt": "You rewrite prose into E. B. White's voice. Preserve all markdown structure (code fences, math, links, list markers, blank lines) verbatim. Section headings may be restyled, but keep each heading's level and meaning. Preserve any 〈MASKED_*〉 tokens verbatim if present. Return only the rewritten prose, nothing else."
+  "system_prompt": "Rewrite the supplied prose in your trained editorial voice. Preserve the meaning, factual details, quotations, narrator's point of view and degree of certainty. Preserve all markdown structure (code fences, math, links, list markers, blank lines) verbatim. Section headings may be restyled, but keep each heading's level and meaning. Preserve any 〈MASKED_*〉 tokens verbatim if present. Return only the rewritten prose, nothing else."
 }

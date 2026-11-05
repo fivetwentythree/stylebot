@@ -8,10 +8,10 @@ from difflib import SequenceMatcher
 from hashlib import sha256
 from pathlib import Path
 
-from stylebot.ai_core import style_system
+from stylebot.draws import draw_from_pair
 from stylebot.pairs import system_sha, validate_pairs_file
 
-PROMPT = style_system("E. B. White")
+DEFAULT_POLICY = Path(__file__).resolve().parents[1] / "examples" / "policy.json"
 CAPITALIZED = re.compile(
     r"(?<![\w’'-])(?:[A-Z][a-z]+(?:[’'][A-Za-z]+)?|[A-Z]{2,})(?![\w’'-])"
 )
@@ -128,12 +128,15 @@ def check(target, draft):
     }
 
 
-def make_pair(passage, draft, check_result, stamp):
+def make_pair(passage, draft, check_result, stamp, prompt):
     source = passage["source"]
     target = passage["target"]
-    key = sha256(
-        f"{source}\0{passage['id']}\0{passage['target_sha256']}\0{draft['model']}".encode()
-    ).hexdigest()[:16]
+    identity = (
+        f"{source}\0{passage['id']}\0{passage['target_sha256']}\0{draft['model']}"
+    )
+    if draft.get("fidelity"):
+        identity += "\0" + sha256(draft["text"].encode("utf-8")).hexdigest()
+    key = sha256(identity.encode()).hexdigest()[:16]
     meta = {
         "source": source,
         "captured_at": stamp,
@@ -147,8 +150,12 @@ def make_pair(passage, draft, check_result, stamp):
         "generator": draft["model"],
         "slop_strategy": draft["strategy"],
         "synth_key": key,
-        "system_sha": system_sha(PROMPT),
-        "tags": ["synthetic", "eb-white", "new-yorker"],
+        "system_sha": system_sha(prompt),
+        "tags": [
+            "synthetic",
+            "eb-white",
+            source.split("/", 1)[0] if draft.get("fidelity") else "new-yorker",
+        ],
         "gen": {
             "model": draft["model"],
             "provider": draft["provider"],
@@ -169,7 +176,7 @@ def make_pair(passage, draft, check_result, stamp):
     }
     return {
         "messages": [
-            {"role": "system", "content": PROMPT},
+            {"role": "system", "content": prompt},
             {"role": "user", "content": draft["text"]},
             {"role": "assistant", "content": target},
         ],
@@ -177,13 +184,37 @@ def make_pair(passage, draft, check_result, stamp):
     }
 
 
+def apply_fidelity_review(passage, raw, result):
+    audit = raw.get("fidelity") or {}
+    if passage["split"] != "train":
+        result["flags"].append("evaluation_split_locked")
+    if (
+        raw.get("target_sha256") != passage["target_sha256"]
+        or audit.get("draft_sha256")
+        != sha256((raw.get("text") or "").encode("utf-8")).hexdigest()
+    ):
+        result["flags"].append("stale_fidelity_review")
+    if (
+        audit.get("verdict") != "pass"
+        or not audit.get("reviewer", "").strip()
+        or not audit.get("note", "").strip()
+    ):
+        result["flags"].append("fidelity_not_approved")
+    result["fidelity"] = audit
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("work_dir", type=Path)
     parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
     parser.add_argument("--stats-only", action="store_true")
     args = parser.parse_args()
     work_dir, output_dir = args.work_dir, args.output_dir
+    policy = json.loads(args.policy.read_text(encoding="utf-8"))
+    prompt = policy.get("system_prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        parser.error("The policy must contain a nonempty system_prompt string.")
     stats = json.loads((work_dir / "source-stats.json").read_text())
     passage_list = read_jsonl(work_dir / "passages.jsonl")
     passages = {p["id"]: p for p in passage_list}
@@ -193,6 +224,8 @@ def main():
         "retry-output.jsonl",
         "qwen-output.jsonl",
         "manual-output.jsonl",
+        "context-reviewed-output.jsonl",
+        "reviewed-output.jsonl",
     ):
         path = work_dir / name
         if path.exists():
@@ -203,6 +236,7 @@ def main():
                 raw.setdefault("temperature", 0.65)
                 if raw.get("text"):
                     raw["text"] = raw["text"].strip()
+                raw["requires_review"] = name.endswith("reviewed-output.jsonl")
                 generated.append(raw)
     review_file = work_dir / "manual-review.json"
     review = json.loads(review_file.read_text()) if review_file.exists() else {}
@@ -224,8 +258,10 @@ def main():
             result["review"] = audit["reason"]
             if audit.get("reject"):
                 result["flags"].append("spot_check_rejection")
+        if raw["requires_review"]:
+            apply_fidelity_review(passage, raw, result)
         if not result["flags"]:
-            accepted[passage["id"]] = make_pair(passage, raw, result, stamp)
+            accepted[passage["id"]] = make_pair(passage, raw, result, stamp, prompt)
         outcomes[passage["id"]] = result
     all_pieces = read_jsonl(work_dir / "pieces.jsonl")
     stats["prose_exclusions"] = {
@@ -266,6 +302,12 @@ def main():
         passages[k]["section"] for k in accepted if passages[k]["split"] == "train"
     )
     stats["manually_reviewed_passages"] = len(review)
+    stats["fidelity_reviewed_passages"] = len(
+        {r["id"] for r in generated if r["requires_review"]}
+    )
+    stats["fidelity_approved_pairs"] = sum(
+        "fidelity" in row["meta"]["quality_checks"] for row in accepted.values()
+    )
     print(json.dumps(stats, indent=2, ensure_ascii=False))
     if args.stats_only:
         return
@@ -284,7 +326,7 @@ def main():
             if p["split"] == split and p["id"] in accepted
         ]
         write_jsonl(path, pairs)
-        errors = validate_pairs_file(path, system_prompt=PROMPT)
+        errors = validate_pairs_file(path, system_prompt=prompt)
         assert not errors, errors
     write_jsonl(
         output_dir / "pieces.jsonl",
@@ -330,8 +372,17 @@ def main():
         r["messages"][1]["content"] != r["messages"][2]["content"]
         for r in train + evaluation
     )
+    # A policy-backed view pins this exact prompt in the upstream run manifest.
+    # Only training pairs enter this derived export, never evaluation pairs.
+    write_jsonl(
+        output_dir / "training-inputs" / "accepted.jsonl",
+        [draw_from_pair(row).to_json() for row in train],
+    )
+    policy["eval_sources"] = sorted(
+        p["source"] for p in all_pieces if p["split"] == "eval"
+    )
     (output_dir / "policy.json").write_text(
-        json.dumps({"system_prompt": PROMPT}, indent=2, ensure_ascii=False) + "\n"
+        json.dumps(policy, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     (output_dir / "dataset-summary.json").write_text(
         json.dumps(stats, indent=2, ensure_ascii=False) + "\n"
