@@ -1,0 +1,10 @@
+# The supplied book, generated pairs, and training artifacts stay local.
+/data/
+/work/
+/Writings/
+/_training_pairs/
+/.venv/
+/.env
+/.envrc
+__pycache__/
+.DS_Store
