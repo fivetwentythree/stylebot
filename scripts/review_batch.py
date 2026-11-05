@@ -58,6 +58,10 @@ def select_passages(work_dir, dataset_dir, limit):
     used = {p["meta"]["passage_id"] for p in accepted}
     counts = Counter(p["meta"]["source"] for p in accepted)
     status = {p["id"]: p for p in read_jsonl(dataset_dir / "passages.jsonl")}
+    exclusions_path = work_dir / "target-exclusions.json"
+    exclusions = (
+        json.loads(exclusions_path.read_text()) if exclusions_path.exists() else {}
+    )
     candidates = defaultdict(list)
     for passage in passages:
         source = passage["source"]
@@ -67,6 +71,7 @@ def select_passages(work_dir, dataset_dir, limit):
             and pieces[source]["split"] == "train"
             and source not in held_sources
             and passage["id"] not in used
+            and passage["id"] not in exclusions
             and "uncertain_source_transcription"
             not in prior.get("rejection_reasons", [])
         ):

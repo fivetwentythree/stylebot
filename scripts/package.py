@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 from hashlib import sha256
 from pathlib import Path
 
+from audit_pairs import apply_legacy_audit, evaluation_eligibility
 from stylebot.draws import draw_from_pair
 from stylebot.pairs import system_sha, validate_pairs_file
 
@@ -61,7 +62,15 @@ def anchors(text):
 
 def pronouns(text):
     # Skip quoted speech so it does not establish the narrator's viewpoint.
-    tokens = set(WORDS.findall(normalize(QUOTES.sub("", text))))
+    narration = QUOTES.sub("", text)
+    # A bibliographic Roman I is not a first-person narrator. Limit this to
+    # clear reference syntax so phrases such as "the volume I read" survive.
+    narration = re.sub(
+        r"\b[Vv]olume I(?=\s*(?:[,;:.)]|\b(?:is|starts|begins|ends|contains)\b|$))",
+        "",
+        narration,
+    )
+    tokens = set(WORDS.findall(normalize(narration)))
     if tokens & {"i", "me", "my", "myself", "i'm", "i've", "i'd"}:
         return "singular"
     if tokens & {"we", "us", "our", "ourselves", "we're", "we've"}:
@@ -154,7 +163,9 @@ def make_pair(passage, draft, check_result, stamp, prompt):
         "tags": [
             "synthetic",
             "eb-white",
-            source.split("/", 1)[0] if draft.get("fidelity") else "new-yorker",
+            source.split("/", 1)[0]
+            if draft.get("fidelity") or check_result.get("legacy_review")
+            else "new-yorker",
         ],
         "gen": {
             "model": draft["model"],
@@ -174,6 +185,8 @@ def make_pair(passage, draft, check_result, stamp, prompt):
         "split": passage["split"],
         "quality_checks": check_result,
     }
+    if draft.get("parent_pair"):
+        meta["parent_pair"] = draft["parent_pair"]
     return {
         "messages": [
             {"role": "system", "content": prompt},
@@ -218,6 +231,14 @@ def main():
     stats = json.loads((work_dir / "source-stats.json").read_text())
     passage_list = read_jsonl(work_dir / "passages.jsonl")
     passages = {p["id"]: p for p in passage_list}
+    audit_path = work_dir / "legacy-audit" / "validated.jsonl"
+    legacy_audits = (
+        {r["id"]: r for r in read_jsonl(audit_path)} if audit_path.exists() else None
+    )
+    exclusion_path = work_dir / "target-exclusions.json"
+    exclusions = (
+        json.loads(exclusion_path.read_text()) if exclusion_path.exists() else {}
+    )
     generated = []
     for name in (
         "drafts.jsonl",
@@ -226,6 +247,7 @@ def main():
         "manual-output.jsonl",
         "context-reviewed-output.jsonl",
         "reviewed-output.jsonl",
+        "legacy-repaired-reviewed-output.jsonl",
     ):
         path = work_dir / name
         if path.exists():
@@ -260,6 +282,10 @@ def main():
                 result["flags"].append("spot_check_rejection")
         if raw["requires_review"]:
             apply_fidelity_review(passage, raw, result)
+        if legacy_audits is not None:
+            apply_legacy_audit(passage, raw, result, legacy_audits)
+        if passage["id"] in exclusions:
+            result["flags"].append("target_excluded")
         if not result["flags"]:
             accepted[passage["id"]] = make_pair(passage, raw, result, stamp, prompt)
         outcomes[passage["id"]] = result
@@ -308,6 +334,37 @@ def main():
     stats["fidelity_approved_pairs"] = sum(
         "fidelity" in row["meta"]["quality_checks"] for row in accepted.values()
     )
+    if legacy_audits is not None:
+        stats["legacy_audit"] = {
+            split: dict(
+                Counter(
+                    r["verdict"] for r in legacy_audits.values() if r["split"] == split
+                )
+            )
+            for split in ("train", "eval")
+        }
+        stats["training_pairs_with_semantic_review"] = sum(
+            row["meta"]["split"] == "train"
+            and bool(
+                row["meta"]["quality_checks"].get("fidelity")
+                or row["meta"]["quality_checks"].get("legacy_review")
+            )
+            for row in accepted.values()
+        )
+        stats["repaired_legacy_training_pairs"] = sum(
+            bool(row["meta"].get("parent_pair")) for row in accepted.values()
+        )
+        _, eligible = evaluation_eligibility(
+            [row for row in accepted.values() if row["meta"]["split"] == "eval"],
+            passages,
+            legacy_audits,
+        )
+        stats["evaluation_eligible_pairs"] = len(eligible)
+        stats["unrepaired_legacy_training_pairs"] = sum(
+            note["split"] == "train" and note["id"] not in accepted
+            for note in legacy_audits.values()
+        )
+    stats["target_exclusions"] = exclusions
     print(json.dumps(stats, indent=2, ensure_ascii=False))
     if args.stats_only:
         return
@@ -358,6 +415,13 @@ def main():
     )
     train = read_jsonl(paths["train"])
     evaluation = read_jsonl(paths["eval"])
+    if legacy_audits is not None:
+        evaluation_audits, eligible = evaluation_eligibility(
+            evaluation, passages, legacy_audits
+        )
+        write_jsonl(output_dir / "evaluation" / "audit.jsonl", evaluation_audits)
+        write_jsonl(output_dir / "evaluation" / "approved-pairs.jsonl", eligible)
+        assert stats["evaluation_eligible_pairs"] == len(eligible)
     assert not {r["meta"]["source"] for r in train} & {
         r["meta"]["source"] for r in evaluation
     }

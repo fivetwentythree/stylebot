@@ -9,7 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from package import apply_fidelity_review
+from package import apply_fidelity_review, pronouns
+from audit_pairs import apply_legacy_audit, evaluation_eligibility, validate_audit
 from review_batch import (
     record_decisions,
     select_passages,
@@ -122,6 +123,13 @@ class FidelityReviewTests(unittest.TestCase):
                 "words": 7,
                 "chunk_index": 0,
             },
+            self.passage
+            | {
+                "id": "excluded-target",
+                "source": "book/quarantined.md",
+                "words": 7,
+                "chunk_index": 0,
+            },
         ]
         write_jsonl(work / "passages.jsonl", rows)
         write_jsonl(
@@ -140,8 +148,132 @@ class FidelityReviewTests(unittest.TestCase):
             data / "evaluation" / "pairs.jsonl", [{"meta": {"source": "book/held.md"}}]
         )
         write_jsonl(data / "passages.jsonl", [])
+        (work / "target-exclusions.json").write_text(
+            json.dumps({"excluded-target": "Target needs transcription verification."})
+        )
         selected = select_passages(work, data, 10)
         self.assertEqual([row["source"] for row in selected], ["book/safe.md"])
+
+
+class LegacyAuditTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        repo = Path(__file__).resolve().parents[1]
+        self.row = json.loads((repo / "examples" / "pairs.jsonl").read_text())
+        self.row["meta"] |= {"passage_id": "fixture-01", "split": "train"}
+        meta = self.row["meta"]
+        self.note = {
+            "id": "fixture-01",
+            "split": "train",
+            "source": meta["source"],
+            "generator": meta["generator"],
+            "capture_id": meta["capture_id"],
+            "target_sha256": text_sha(self.row["messages"][2]["content"]),
+            "draft_sha256": text_sha(self.row["messages"][1]["content"]),
+            "verdict": "pass",
+            "reviewer": "test reviewer",
+            "note": "Fixture reviewed.",
+        }
+        self.passage = {
+            "id": "fixture-01",
+            "source": meta["source"],
+            "split": "train",
+            "target_sha256": self.note["target_sha256"],
+        }
+        self.raw = {
+            "id": "fixture-01",
+            "model": meta["generator"],
+            "text": self.row["messages"][1]["content"],
+        }
+
+    def validated(self, notes):
+        snapshot, decisions = self.root / "snapshot", self.root / "decisions"
+        write_jsonl(snapshot, [self.row])
+        write_jsonl(decisions, notes)
+        return list(validate_audit(snapshot, decisions))
+
+    def test_audit_requires_complete_snapshot_coverage(self):
+        self.assertEqual(self.validated([self.note]), [self.note])
+        with self.assertRaisesRegex(ValueError, "every pair"):
+            self.validated([])
+
+    def test_volume_roman_numeral_does_not_hide_lost_narrator(self):
+        self.assertEqual(pronouns("The initial entry in Volume I is a bird."), "")
+        self.assertEqual(
+            pronouns("Volume I starts with a bird. I read it."), "singular"
+        )
+        self.assertEqual(pronouns("This is the volume I read."), "singular")
+
+    def test_audit_rejects_changed_content_or_provenance(self):
+        for field in ("target_sha256", "draft_sha256", "source", "generator", "split"):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, "Stale or misattributed"):
+                    self.validated([self.note | {field: "changed"}])
+
+    def test_legacy_rejection_and_unreviewed_alternative_cannot_pass(self):
+        result = {"flags": []}
+        apply_legacy_audit(
+            self.passage,
+            self.raw,
+            result,
+            {"fixture-01": self.note | {"verdict": "reject"}},
+        )
+        self.assertIn("legacy_fidelity_not_approved", result["flags"])
+        result = {"flags": []}
+        apply_legacy_audit(
+            self.passage,
+            self.raw | {"text": "A different unreviewed draft."},
+            result,
+            {"fixture-01": self.note},
+        )
+        self.assertIn("unreviewed_legacy_variant", result["flags"])
+
+    def test_unchanged_approved_legacy_pair_passes(self):
+        result = {"flags": []}
+        apply_legacy_audit(self.passage, self.raw, result, {"fixture-01": self.note})
+        self.assertEqual(result["flags"], [])
+        self.assertEqual(result["legacy_review"], self.note)
+
+    def make_evaluation(self):
+        self.row["meta"]["split"] = self.passage["split"] = self.note["split"] = "eval"
+
+    def test_failed_evaluation_is_preserved_but_not_scored(self):
+        self.make_evaluation()
+        self.note["verdict"] = "reject"
+        before = copy.deepcopy(self.row)
+        result = {"flags": []}
+        apply_legacy_audit(self.passage, self.raw, result, {"fixture-01": self.note})
+        report, eligible = evaluation_eligibility(
+            [self.row],
+            {"fixture-01": self.passage},
+            {"fixture-01": self.note},
+        )
+        self.assertEqual(self.row, before)
+        self.assertEqual(result["flags"], [])
+        self.assertEqual(eligible, [])
+        self.assertTrue(report[0]["fingerprints_match"])
+        self.assertFalse(report[0]["scoring_eligible"])
+
+    def test_scoring_requires_exact_approved_evaluation_messages(self):
+        self.make_evaluation()
+        _, eligible = evaluation_eligibility(
+            [self.row],
+            {"fixture-01": self.passage},
+            {"fixture-01": self.note},
+        )
+        self.assertEqual(eligible, [self.row])
+        for message_index in (1, 2):
+            with self.subTest(message_index=message_index):
+                changed = copy.deepcopy(self.row)
+                changed["messages"][message_index]["content"] += " Changed."
+                _, eligible = evaluation_eligibility(
+                    [changed],
+                    {"fixture-01": self.passage},
+                    {"fixture-01": self.note},
+                )
+                self.assertEqual(eligible, [])
 
 
 class ServingPromptTests(unittest.TestCase):

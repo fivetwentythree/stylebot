@@ -9,6 +9,7 @@ scripts/
   prepare.py           Split the supplied text into pieces and passages
   merge_essays.py      Add the essay collection and remove overlapping passages
   review_batch.py      Select training passages and record exact-pair reviews
+  audit_pairs.py       Validate a complete review of an older accepted snapshot
   synthesize.swift     Optional drafts from Apple’s on-device model
   synthesize_ollama.py Optional drafts from an existing local Ollama model
   package.py           Check drafts and export training and evaluation files
@@ -24,15 +25,28 @@ The book text and generated pairs stay in local files. The public repository con
 
 ## Current dataset
 
-The two collections contain 963 distinct candidate passages. The current pool has 191 accepted training pairs from 111 pieces and 49 external evaluation pairs from 24 held-out pieces. Of the training pairs, 99 come from *Writings from the New Yorker* and 92 come from *Essays of E. B. White*. Other passages remain indexed locally for generation or review.
+The two collections contain 963 indexed candidate passages. The reviewed training pool has 180 pairs from 105 pieces. Of these, 93 come from *Writings from the New Yorker* and 87 come from *Essays of E. B. White*. Other passages remain indexed locally for generation or review.
 
-The latest batch screened 84 contextual Apple drafts. Seventy failed mechanical checks and the other fourteen failed semantic review, including cases that imported neighboring text. Twenty-four passages were then rewritten directly in Codex and checked again. Those 24 additions have recorded fidelity decisions bound to their exact input and target hashes. This was Codex self-review after repair. The earlier pool has mechanical checks and 15 spot-review decisions. The entire pool still needs broader semantic review before a quality-focused training run. No paid training has started.
+All 216 pairs in the older accepted pool received a semantic review. The original drafts often passed mechanical checks while losing details or reversing meanings. The resulting decisions are recorded against the exact target, draft, generator, source and original record identity.
+
+| Older pool | Kept unchanged | Repaired | Set aside |
+| --- | --- | --- | --- |
+| 167 training pairs | 30 | 126 | 11 |
+| 49 evaluation pairs | 10 eligible for scoring | 0 | 39 excluded from scoring |
+
+The 180 training pairs comprise the 30 retained older drafts, 126 corrected older drafts and 24 additions from the preceding batch. All have recorded semantic approvals. Repairs retain their original draft fingerprints and generator attribution in `meta.parent_pair`. These are Codex reviews, including self-review of Codex corrections, rather than independent human certification. No paid training has started.
+
+All 49 original evaluation records remain byte-for-byte unchanged. A separate scoring file contains the 10 that passed review. Eligibility was decided before any trained-model outputs existed. This is a small scoring set and needs broader coverage before drawing strong conclusions about style quality. An earlier on-device generation batch screened 84 drafts, rejected all 84, and supplied the targets for the 24 subsequently corrected additions.
 
 No exact 24-word sequence crossed the training and evaluation split. The anthology’s *Here Is New York* is the only copy in the corpus.
 
 ## Voice instruction
 
 The system prompt begins “Rewrite the supplied prose in your trained editorial voice.” It does not name White. Every pair uses the same instruction, with White’s prose as the assistant target. The name and source attribution remain in project documentation and provenance.
+
+Once trained, select the fine-tuned checkpoint or load its adapter to use the voice. The application supplies the saved system instruction automatically. No special tag is required for this single-voice model. Tags would be a separate design choice if one model were later trained to switch among several voices.
+
+Dataset metadata tags such as `eb-white` are bookkeeping labels. They are not included in the chat messages and do not need to be typed by the user.
 
 The hypothesis is that fine-tuning can make this voice the model’s default rewriting behavior. Removing the author’s name is not evidence of better style or guaranteed imitation. That needs blind comparisons on held-out passages and unfamiliar topics. “Use the given style” is ambiguous when no reference style has been supplied. A consistent instruction tied to the trained voice is clearer.
 
@@ -51,7 +65,7 @@ The merge preserves the earlier piece IDs and holdouts. It removes new passages 
 
 ## Generate and review a batch
 
-Select unfinished training passages with neighboring context. Evaluation pieces and already accepted passages are excluded. Context is for interpreting references and stops outside the target span. It does not enter the training messages.
+Select unfinished training passages with neighboring context. Evaluation pieces, accepted passages and targets in `work/white-combined/target-exclusions.json` are excluded. Target exclusions cover an extensively attributed translation, an uncertain transcription and an abbreviated observation ledger. Context is for interpreting references and stops outside the target span. It does not enter the training messages.
 
 ```sh
 python3 scripts/review_batch.py prepare work/white-combined data/eb-white \
@@ -81,9 +95,22 @@ python3 scripts/review_batch.py record \
 
 For repairs, use separate `context-repairs.jsonl` and `context-repair-notes.jsonl` files, then run the same recorder to produce `reviewed-output.jsonl`. These names preserve the original batch decisions. Archive completed batches before reusing the working filenames.
 
+## Review an older pool
+
+Save the accepted training and evaluation records in `work/white-combined/legacy-audit/pairs-before.jsonl` before editing anything. Review every pair and record one decision per passage in `notes.jsonl`. Each decision includes `id`, `split`, `source`, `generator`, `capture_id`, `target_sha256`, `draft_sha256`, `verdict`, `reviewer` and a specific `note`.
+
+```sh
+python3 scripts/audit_pairs.py \
+  work/white-combined/legacy-audit/pairs-before.jsonl \
+  work/white-combined/legacy-audit/notes.jsonl \
+  work/white-combined/legacy-audit/validated.jsonl
+```
+
+The validator requires complete snapshot coverage and matching content and provenance. Once the audit exists, the packager admits historical training drafts only when their exact version has passed. A different older generator output cannot silently replace a rejected draft. Corrected training drafts pass through `review_batch.py record` into `legacy-repaired-reviewed-output.jsonl`, with fresh reviews and fingerprints. Evaluation drafts are not repaired. The original evaluation file, audit decisions and approved scoring subset are separate exports.
+
 ## Package and verify
 
-The packager uses the upstream Stylebot validator. It checks length, copying, numeric literals, quotations, capitalized terms, narrator perspective and paragraph breaks. The new reviewed-batch files also require a passing fidelity decision with matching hashes. Historical generator files remain readable to reproduce the earlier pool. Mechanical checks cannot establish semantic fidelity by themselves.
+The packager uses the upstream Stylebot validator. It checks length, copying, numeric literals, quotations, capitalized terms, narrator perspective and paragraph breaks. Reviewed-batch files require a passing fidelity decision with matching hashes. Historical generator files remain readable and are subject to the legacy audit when present. Mechanical checks cannot establish semantic fidelity by themselves. For example, the review found that a Roman numeral in “Volume I” had concealed a missing first-person narrator; that reference syntax is now excluded from the pronoun check.
 
 ```sh
 STYLEBOT='git+https://github.com/danmackinlay/stylebot.git@0101733d68e53221068994444ed3bbb7c4dc92ce'
@@ -95,14 +122,16 @@ The packaged dataset contains these exports.
 | File | Purpose |
 | --- | --- |
 | `pairs.jsonl` | Accepted training pairs in Stylebot format |
-| `evaluation/pairs.jsonl` | Accepted pairs from whole pieces held out before generation |
+| `evaluation/pairs.jsonl` | Frozen original evaluation records from whole held-out pieces |
+| `evaluation/audit.jsonl` | Exact-pair review decisions and scoring eligibility |
+| `evaluation/approved-pairs.jsonl` | Unmodified records that passed review, for scoring |
 | `training-inputs/accepted.jsonl` | Training-only records for the policy-backed training view |
 | `policy.json` | The matching voice prompt and evaluation-source exclusion list |
 | `pieces.jsonl` | Piece titles, dates, source lines and split assignments |
 | `passages.jsonl` | Candidate targets and pairing status |
 | `dataset-summary.json` | Counts, coverage and quality-check outcomes |
 
-The packager defaults to `examples/policy.json` and accepts `--policy` for an explicit replacement. Changing the prompt re-exports the message and prompt hash for every pair. The latest export changed the evaluation system instruction while preserving all 49 evaluation inputs, targets, source assignments and record IDs.
+The packager defaults to `examples/policy.json` and accepts `--policy` for an explicit replacement. The author-free prompt migration preceded the older-pair audit. During this audit, the evaluation messages and metadata remained unchanged. Changing the prompt later would produce a new evaluation version and require a new snapshot.
 
 Regression checks use invented text and make no model calls.
 
